@@ -1,0 +1,10 @@
+# secrets
+.env
+# generated: source exports, repo caches, build logs, results, NWM download cache
+cache/
+logs/
+results/
+data/
+# builds/ records hold absolute local source paths
+builds/
+__pycache__/
