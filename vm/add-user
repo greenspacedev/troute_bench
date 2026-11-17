@@ -1,0 +1,8 @@
+#!/bin/bash
+# Create a key-only benchmark user.  Usage: sudo add-user <name> <key.pub>
+set -euo pipefail
+u=$1; key=$2
+adduser --disabled-password --gecos "" "$u"
+usermod -aG docker,bench "$u"
+install -d -m 700 -o "$u" -g "$u" /home/$u/.ssh
+install -m 600 -o "$u" -g "$u" "$key" /home/$u/.ssh/authorized_keys

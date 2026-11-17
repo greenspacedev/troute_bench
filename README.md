@@ -25,6 +25,8 @@ powerprofilesctl set performance
 ./bench.sh compare                               # do current's outputs match the baseline's?
 ```
 
+On the benchmark VM, skip `powerprofilesctl`; setup and users are in [`vm/README.md`](vm/README.md).
+
 Results go to `results/<UTC time>_<case>/`:
 
 | File | What |
@@ -163,6 +165,7 @@ means many consecutive cycles (`03w_short_day`, `CYCLES=`).
 | `lib/compare.py` | `compare.md` (runs inside the t-route image) |
 | `lib/hostinfo.py` | host description and power check |
 | `lib/pin_usgsdf.py` | pins troute-usgsdf in `preprocess.Dockerfile` |
+| `vm/` | benchmark VM setup (`README.md`) and `add-user` script |
 
 Generated and gitignored: `cache/` (git mirrors, source exports), `builds/`, `logs/`, `results/`,
 `data/` (shared NWM cache), `.env`.
