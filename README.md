@@ -1,14 +1,7 @@
 # troute_bench
 
 Performance benchmarks for the NWM → t-route → NextGen pipeline
-(routing-comparison-nwm-nextgen-troute + troute-usgsdf + t-route). Each of our
-improvements is measured against the RA's original code (the **baseline**), on the same
-inputs, the same machine and the same Docker images the pipeline runs in production
-(AWS Lambda containers).
-
-Status (2026-11-13): first version. It covers what the pipeline can run today: VPU 03W,
-short-range cycles (18 h each), singly or as many consecutive cycles. Longer runs and other
-VPUs come next (see Roadmap).
+(routing-comparison-nwm-nextgen-troute + troute-usgsdf + t-route).
 
 ## Quick start
 
@@ -148,8 +141,6 @@ means many consecutive cycles (`03w_short_day`, `CYCLES=`).
 3. Longer simulations: medium range (fix the three items above), then a harness-owned
    *hindcast* mode (hourly analysis_assim files chained over days to months, 24-h loops)
    for multi-month runs. Data: ~10 GB of NWM files per simulated month (CONUS files, 14.3 MB/h).
-4. Optional: a variant type that runs a native (non-Docker) build, so the 2022 code of
-   `troute_paper/repro/perf_2022` can be compared later on the same cases.
 
 ## Files
 
