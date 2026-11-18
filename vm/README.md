@@ -74,6 +74,7 @@ from a second terminal.
 cd /data
 git clone <repo-url> troute_bench && cd troute_bench
 cp .env.example .env    # add HYDROTOOLS_USGS_API_KEY
+echo 'USGS_CHUNK="${USGS_CHUNK:-40}"' >> .env
 chmod 640 .env          # shared key, readable by group bench
 ./build.sh
 ```
@@ -99,8 +100,13 @@ REPEATS=3 ./bench.sh run 03w_medium baseline <variant> # warm-up + 3 alternating
 ```
 Options and cases: [`../README.md`](../README.md).
 
-USGS limit: 1000 requests/h per key (`x-ratelimit-limit`), shared by all users. One 03W run
-makes ~74. `03w_short_day` (24 cycles) exceeds it.
+USGS limit: 1000 requests/h per key (`x-ratelimit-limit`, rolling), shared by all users.
+
+`USGS_CHUNK` defaults to 40 on the VM (`.env`) for all runs: 40 gages per request, ~10
+requests per 03W run instead of ~74, so long batches stay under the limit and don't fail on
+HTTP 429. Data is identical. Cost: the USGS step runs one request per batch (baseline medium
+range: 18 s → 99 s; shorter fetch windows cost less). For production-faithful preprocess timing:
+`USGS_CHUNK=5 ./bench.sh run ...`.
 
 ### Results
 
