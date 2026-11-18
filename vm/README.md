@@ -68,16 +68,64 @@ from a second terminal.
 
 ## Running benchmarks
 
+### Install (once, admin)
+
 ```bash
 cd /data
 git clone <repo-url> troute_bench && cd troute_bench
 cp .env.example .env    # add HYDROTOOLS_USGS_API_KEY
+chmod 640 .env          # shared key, readable by group bench
 ./build.sh
-./bench.sh run 03w_short baseline
 ```
+
+One shared checkout and one USGS key for all users. Images are shared through Docker; users
+don't rebuild.
+
+### Run
+
+```bash
+cd /data/troute_bench
+./bench.sh list                                        # cases, built variants, past batches
+[VAR=value ...] ./bench.sh run <case> <variant> [<variant> ...]
+```
+
+Use `tmux` for long batches. Batches survive a dropped SSH connection only inside it.
+
+Examples:
+```bash
+./bench.sh run 03w_short baseline                      # 1 short-range cycle, warm-up + 3 repeats
+REPEATS=1 WARMUP=0 ./bench.sh run 03w_medium baseline  # single 240-h run
+REPEATS=3 ./bench.sh run 03w_medium baseline <variant> # warm-up + 3 alternating repeats each
+```
+Options and cases: [`../README.md`](../README.md).
+
+USGS limit: 1000 requests/h per key (`x-ratelimit-limit`), shared by all users. One 03W run
+makes ~74. `03w_short_day` (24 cycles) exceeds it.
+
+### Results
+
+```bash
+./bench.sh summarize && ./bench.sh compare             # newest batch
+less results/<batch>/summary.md
+```
+
+| | |
+|---|---|
+| `wall s`, `median`, `IQR` | per step and variant over repeats; warm-up excluded |
+| `speedup vs baseline (95% CI)` | median of paired ratios, first variant = baseline. **faster**/**slower** only when the CI excludes 1; ≥3 pairs needed |
+| `CPU s` | user + sys. CPU s / wall s ≈ cores used |
+| `peak mem MiB` | cgroup `memory.peak`; ⚠ above Lambda's 10 GB |
+| t-route phases | from t-route's log; routing = `MC computation` |
+| `compare.md` | output agreement with the baseline (flows, DA dataframe, restart) |
+
+Check `runs.csv` (`exit_code`, `oom_killed`) before reading the numbers. A failed or rate-limited
+run (HTTP 429) invalidates the batch.
+
+### VM notes
 
 - No cpufreq or hwmon in the guest: clock and temperature columns are empty.
 - `hostinfo.py --check` passes (no battery or power profile to check). `powerprofilesctl` is not needed.
+- Stopping a batch: Ctrl-C, then `docker ps` and `docker stop` any leftover container.
 
 ## Verify
 
