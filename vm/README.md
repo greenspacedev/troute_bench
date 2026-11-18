@@ -73,7 +73,7 @@ cd /data
 git clone <repo-url> troute_bench && cd troute_bench
 cp .env.example .env    # add HYDROTOOLS_USGS_API_KEY
 ./build.sh
-./bench.sh run 03w_short baseline current
+./bench.sh run 03w_short baseline
 ```
 
 - No cpufreq or hwmon in the guest: clock and temperature columns are empty.

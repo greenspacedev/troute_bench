@@ -4,7 +4,7 @@
 #
 #   ./build.sh                 # every variant in variants/*.env
 #   ./build.sh baseline        # only the variants you name
-#   FORCE=1 ./build.sh current # rebuild even if an image for those SHAs exists
+#   FORCE=1 ./build.sh baseline # rebuild even if an image for those SHAs exists
 #
 # For each variant this:
 #   1. resolves ROUTING_REF / USGSDF_REF / TROUTE_REF to commit SHAs (fetching from

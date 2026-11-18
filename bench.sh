@@ -38,10 +38,11 @@
 #   Case values (START_TIME, CYCLES, CYCLE_STEP_H, VPU, N_CPUS, ...) can be overridden too.
 #
 # Examples:
-#   ./bench.sh run 03w_short baseline current                   # e2e, 1 cycle, 3 repeats
-#   REPEATS=5 CACHE=warm ./bench.sh run 03w_short baseline current
-#   INPUTS=baseline STEPS=troute N_CPUS=4 ./bench.sh run 03w_short baseline current
-#   REPEATS=1 ./bench.sh run 03w_short_day baseline current     # 24 consecutive cycles
+#   ./bench.sh run 03w_short baseline                           # e2e, 1 cycle, 3 repeats
+#   REPEATS=5 CACHE=warm ./bench.sh run 03w_short baseline
+#   INPUTS=baseline STEPS=troute N_CPUS=4 ./bench.sh run 03w_short baseline
+#   REPEATS=1 ./bench.sh run 03w_short_day baseline             # 24 consecutive cycles
+#   REPEATS=1 WARMUP=0 ./bench.sh run 03w_medium baseline       # 10-day medium range
 #   ./bench.sh summarize && ./bench.sh compare
 # =============================================================================
 set -euo pipefail

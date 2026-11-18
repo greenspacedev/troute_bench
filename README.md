@@ -10,8 +10,7 @@ cp .env.example .env                 # HYDROTOOLS_USGS_API_KEY
 ./build.sh                           # all variants; first t-route compile ~10+ min
 ./bench.sh list                      # cases, variants, commits, past batches
 powerprofilesctl set performance     # laptop only; plug in
-./bench.sh run 03w_short baseline current       # 1 cycle, warm-up + 3 repeats per variant
-./bench.sh compare                               # output agreement with baseline
+./bench.sh run 03w_short baseline      # 1 cycle, warm-up + 3 repeats
 ```
 
 VM setup and users: [`vm/README.md`](vm/README.md).
@@ -33,19 +32,21 @@ builds images, writes `builds/<variant>.json`. `bench.sh` runs those images.
 
 | Variant | routing-comparison | troute-usgsdf | t-route |
 |---|---|---|---|
-| `baseline` | alk05 `updates_for_da` `10e6b01` | alk05 `temp_routelinkdev` `0a77846` | alk05 `update_for_feather_da` `ca72603` |
-| `current` | local `use-our-troute-usgsdf` | local `vectorize-routelink-gages` | greenspacedev `update_for_feather_da` (= baseline) |
+| `baseline` | greenspacedev `medium-range` `8b67fd4` | alk05 `temp_routelinkdev` `0a77846` | alk05 `update_for_feather_da` `ca72603` |
 
+- `medium-range` = alk05 `updates_for_da` (`10e6b01`) + one commit enabling medium range:
+  ensemble member 1 for `FORECAST_TYPE=2` (`fetch_nwm_data.py`), `medium_range` file names in
+  `rename_troute_inputs.py`. Otherwise identical.
 - `preprocess.Dockerfile` clones troute-usgsdf unpinned (`git clone --depth 1 -b ...`).
-  `lib/pin_usgsdf.py` replaces that `RUN` with a `COPY` at a fixed SHA, in both variants. No
-  other Dockerfile changes.
+  `lib/pin_usgsdf.py` replaces that `RUN` with a `COPY` at a fixed SHA. No other Dockerfile
+  changes.
 - Local sources build committed work only.
 - Image tags are source SHAs (`tb-preprocess:<routing>-<usgsdf>`, `tb-troute:<t-route>`,
   `tb-postprocess:<routing>`); variants sharing a commit share an image.
 
-New variant: copy `variants/current.env` to `variants/<name>.env`, set refs, then
-`./build.sh <name>` and `./bench.sh run <case> baseline <name>`. One variant per change to
-isolate its effect.
+New variant: copy `variants/baseline.env` to `variants/<name>.env`, set refs, then
+`./build.sh <name>` and `./bench.sh run <case> baseline <name>` (first variant = reference for
+speedups and `./bench.sh compare`).
 
 ## Tracks
 
@@ -80,8 +81,9 @@ Environment variables (`VAR=value ./bench.sh run ...`). Full list: header of `be
 |---|---|---|
 | `03w_short` | 1 short-range cycle, VPU 03W (135,375 segments, 18 h, 216 steps) | ~270 MB |
 | `03w_short_day` | 24 hourly cycles, consecutive | ~6.5 GB per pass |
+| `03w_medium` | 1 medium-range cycle, member 1 (240 h, 2880 steps); 00/06/12/18 UTC only | ~3.4 GB |
 
-3-day run: `CYCLES=72 REPEATS=1 ./bench.sh run 03w_short_day baseline current`
+3-day run: `CYCLES=72 REPEATS=1 ./bench.sh run 03w_short_day baseline`
 
 ## Interpreting results
 
@@ -96,27 +98,24 @@ Environment variables (`VAR=value ./bench.sh run ...`). Full list: header of `be
 
 ## Known limits (2026-11-13)
 
-- **Medium range (2/3) fails.** `fetch_nwm_data.py` passes `meminput=0` to nwmurl
-  (`ValueError: meminput`). Files: `medium_range_mem1/…channel_rt_1.fNNN`, hourly to f240.
-  `rename_troute_inputs.py` matches `short_range` names only.
+- **Medium range no-DA (3)** not enabled.
 - **Long range (4) fails.** Requests `long_range/…channel_rt.tmNNN` hourly (404). Files:
   `long_range_mem1/…channel_rt_1.fNNN`, 6-hourly.
-- **Single loop.** `max_loop_size = nts`: whole run in memory. Fine for 18 h; 10–30 day runs on
-  large VPUs need loops.
+- **Single loop.** `max_loop_size = nts`: whole run in memory. Medium-range memory not yet
+  measured; larger VPUs and 30-day runs likely need loops.
 - **Stock t-route image fails to import.** `requirements.txt` pins `numpy~=1.0`, not `pyarrow`;
   pyarrow 26.0.1 needs NumPy 2 (`ImportError: pyarrow requires NumPy 2.0 or newer`). Variants set
   `TROUTE_PIP_PINS="pyarrow==23.0.0"`; `build.sh` checks the import.
 - **03W mask only** (`data/vpu03w_ids.txt` in the image). Other VPUs fail in preprocess.
 
-Longest supported run: one 18-h short-range cycle. Longer = consecutive cycles
-(`03w_short_day`, `CYCLES=`).
+Longest supported run: one 240-h medium-range cycle (`03w_medium`).
 
 ## Roadmap
 
-1. Baseline vs current on `03w_short`, `03w_short_day`; routing-only `N_CPUS` sweep.
+1. Baseline on `03w_short`, `03w_short_day`, `03w_medium`; routing-only `N_CPUS` sweep.
 2. Mississippi VPU masks (05, 06, 07, 08, 10L, 10U, 11), mounted into preprocess (baseline image
    unchanged); per-VPU cases.
-3. Longer runs: fix medium range, then a hindcast mode (hourly analysis_assim chained over
+3. Longer runs: long range, then a hindcast mode (hourly analysis_assim chained over
    days–months, 24-h loops). ~10 GB NWM data per simulated month (14.3 MB/h CONUS).
 
 ## Files
