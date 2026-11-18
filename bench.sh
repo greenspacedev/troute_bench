@@ -349,12 +349,16 @@ PY
 cmd_summarize() {
     local b="${1:-$(latest_batch)}"
     [[ -d "${b}" ]] || b="${RESULTS}/${b}"
+    [[ -d "${b}" ]] || die "no such batch: ${1}"
+    b="$(cd "${b}" && pwd)"   # absolute: docker -v needs it
     python3 "${LIB}/summarize.py" "${b}"
 }
 
 cmd_compare() {
     local b="${1:-$(latest_batch)}"
     [[ -d "${b}" ]] || b="${RESULTS}/${b}"
+    [[ -d "${b}" ]] || die "no such batch: ${1}"
+    b="$(cd "${b}" && pwd)"   # absolute: docker -v needs it
     local base
     base=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["baseline"])' "${b}/batch.json")
     eval "$(vars_from_build "${base}")"
