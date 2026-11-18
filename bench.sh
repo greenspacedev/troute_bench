@@ -34,6 +34,8 @@
 #   MIN_FREE_GB=10   stop before a run if the disk has less free space than this
 #   TAG=             label added to the batch folder name
 #   DOWNLOAD_JOBS=8  parallel NWM downloads (images that support it)
+#   USGS_CHUNK=      gages per USGS request (HYDROTOOLS_CHUNK_SIZE; hydrotools default 5).
+#                    40 = one request per troute-usgsdf batch: ~10 requests per 03W run, not ~74
 #   HYDROTOOLS_USGS_API_KEY  USGS key; read from .env if present (never commit it)
 #   Case values (START_TIME, CYCLES, CYCLE_STEP_H, VPU, N_CPUS, ...) can be overridden too.
 #
@@ -116,7 +118,7 @@ cmd_run() {
     REPEATS="${REPEATS:-3}"; STEPS="${STEPS:-preprocess troute postprocess}"
     INPUTS="${INPUTS:-own}"; CACHE="${CACHE:-off}"; WARMUP="${WARMUP:-1}"
     LAMBDA="${LAMBDA:-0}"; KEEP="${KEEP:-first}"; ECHO="${ECHO:-0}"
-    HOST_CHECK="${HOST_CHECK:-1}"; MIN_FREE_GB="${MIN_FREE_GB:-10}"; DOWNLOAD_JOBS="${DOWNLOAD_JOBS:-8}"
+    HOST_CHECK="${HOST_CHECK:-1}"; MIN_FREE_GB="${MIN_FREE_GB:-10}"; DOWNLOAD_JOBS="${DOWNLOAD_JOBS:-8}"; USGS_CHUNK="${USGS_CHUNK:-}"
     [[ "${CACHE}" =~ ^(off|cold|warm)$ ]] || die "CACHE must be off, cold or warm"
     [[ "${KEEP}" =~ ^(first|all|none)$ ]] || die "KEEP must be first, all or none"
     read -r -a STEP_LIST <<<"${STEPS}"
@@ -182,7 +184,7 @@ cmd_run() {
     [[ "${CYC_START[0]}" == "${START_TIME}" ]] || die "internal: first cycle ${CYC_START[0]} != START_TIME ${START_TIME}"
 
     export REPEATS STEPS INPUTS CACHE WARMUP LAMBDA KEEP N_CPUS VPU FORECAST_TYPE \
-        START_TIME CYCLES CYCLE_STEP_H DESCRIPTION DOWNLOAD_JOBS
+        START_TIME CYCLES CYCLE_STEP_H DESCRIPTION DOWNLOAD_JOBS USGS_CHUNK
     CASE="${CASE}" VARS="${VARIANTS[*]}" HOST_OK="${host_ok}" BATCH_NAME="${batch_name}" \
     CYCS="${CYC_START[*]}" \
     python3 - "${BENCH}" "${LIB}/hostinfo.py" >"${BATCH}/batch.json" <<'PY'
@@ -197,7 +199,7 @@ print(json.dumps({
              "forecast_type": e["FORECAST_TYPE"], "start_time": e["START_TIME"],
              "cycles": int(e["CYCLES"]), "cycle_step_h": int(e["CYCLE_STEP_H"]), "n_cpus": e["N_CPUS"],
              "cycle_starts": e["CYCS"].split()},
-    "options": {k.lower(): e[k] for k in ("REPEATS", "STEPS", "INPUTS", "CACHE", "WARMUP", "LAMBDA", "KEEP", "DOWNLOAD_JOBS")},
+    "options": {k.lower(): e[k] for k in ("REPEATS", "STEPS", "INPUTS", "CACHE", "WARMUP", "LAMBDA", "KEEP", "DOWNLOAD_JOBS", "USGS_CHUNK")},
     "variants": vs, "baseline": vs[0],
     "builds": {v: json.load(open(f"{bench}/builds/{v}.json")) for v in set(vs + ([e["INPUTS"]] if e["INPUTS"] != "own" else []))},
     "host": json.loads(subprocess.run([sys.executable, hostinfo], capture_output=True, text=True).stdout),
@@ -241,7 +243,8 @@ PY
                      -v "${data}:/routing-comparison-nwm-nextgen-troute/t-route"
                      --env START_TIME="${start}" --env FORECAST_TYPE="${FORECAST_TYPE}"
                      --env VPU="${VPU}" --env N_CPUS="${N_CPUS}" --env HYDROTOOLS_USGS_API_KEY
-                     --env DOWNLOAD_JOBS="${DOWNLOAD_JOBS}" "${cache_args[@]}" "${PRE_IMAGE}") ;;
+                     --env DOWNLOAD_JOBS="${DOWNLOAD_JOBS}" ${USGS_CHUNK:+--env HYDROTOOLS_CHUNK_SIZE="${USGS_CHUNK}"} \
+                     "${cache_args[@]}" "${PRE_IMAGE}") ;;
             troute)
                 cmd=(docker run --cidfile "${cid}" "${LIMITS[@]}" --env PYTHONUNBUFFERED=1
                      -v "${data}:/ngen/ngen/data:rw" -w /ngen/ngen/data
