@@ -36,8 +36,8 @@
 #   DOWNLOAD_JOBS=8  parallel NWM downloads (images that support it)
 #   USGS_CHUNK=      gages per USGS request (HYDROTOOLS_CHUNK_SIZE; hydrotools default 5).
 #                    40 = one request per troute-usgsdf batch: ~10 requests per 03W run, not ~74
-#   RUN_HOURS=       FORECAST_TYPE 5 (chained AnA): hours to run (case value)
-#   MAX_LOOP_SIZE=   FORECAST_TYPE 5: t-route max_loop_size in hours (preprocess default 24)
+#   RUN_HOURS=       FORECAST_TYPE 5 / 12 (chained AnA / retro): hours to run (case value)
+#   MAX_LOOP_SIZE=   FORECAST_TYPE 5 / 12: t-route max_loop_size in hours (preprocess default 24)
 #   MAX_LOOPS=       t-route max_loop_size values (forcing files = hours per loop), e.g.
 #                    "240 120 24". Each value runs as its own label VARIANT@L<n>. Needs
 #                    INPUTS=<variant>; leave postprocess out (it reads a single output file).
