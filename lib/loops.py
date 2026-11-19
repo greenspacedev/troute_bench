@@ -16,8 +16,9 @@ Each phase is assigned to the loop it serves: forcing(k) and output(k) to loop k
 the loop whose interval they fall in. loop_s = forcing + MC + output; mc_other_s = MC - JIT -
 PARALLEL (Python around the routing kernel). sim_h = simulated hours of the loop
 (max_loop_size from the run label @L<n>, the case, or one loop of run_hours), so s_per_h
-compares loops of different sizes. t_end_s = seconds from the first log line to the loop's
-output, for timelines.
+compares loops of different sizes. t_end_s = seconds from the first t-route log line to the
+loop's output; t_run_s = the same on measure.py's clock (the HH:MM:SS prefix, 1 s resolution,
+seconds since the "==>" line), which lines up with <step>.samples.csv.
 
 Runs that died partway keep the loops they finished. Standard library only.
 """
@@ -28,6 +29,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+PREFIX = re.compile(r"^(\d\d):(\d\d):(\d\d) ")
 STAMP = re.compile(r"^\d\d:\d\d:\d\d (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3}) - ")
 PHASES = [
     ("forcing", re.compile(r"\]: lateral inflow DataFrame creation complete in ([\d.]+) seconds")),
@@ -38,7 +40,7 @@ PHASES = [
 ]
 SETUP = re.compile(r"\]: (?P<k>.+?) complete in (?P<s>[\d.]+) seconds")
 FIELDS = ["batch", "cycle", "trial", "repeat", "variant", "loop", "sim_h", "forcing_s", "jit_s",
-          "parallel_s", "mc_other_s", "mc_s", "output_s", "loop_s", "s_per_h", "t_end_s", "complete"]
+          "parallel_s", "mc_other_s", "mc_s", "output_s", "loop_s", "s_per_h", "t_end_s", "t_run_s", "complete"]
 
 
 def loop_hours(variant, case):
@@ -59,8 +61,13 @@ def parse_log(text):
     n_forcing = 0       # forcing reads so far
     n_output = 0
     t0 = None
-    ends = {}
+    p0 = None           # measure.py prefix of the first line, seconds of day
+    ends, run_ends = {}, {}
     for line in text.splitlines():
+        pm0 = PREFIX.match(line)
+        p = int(pm0[1]) * 3600 + int(pm0[2]) * 60 + int(pm0[3]) if pm0 else None
+        if p is not None and p0 is None:
+            p0 = p
         m = STAMP.match(line)
         t = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S,%f") if m else None
         if t and t0 is None:
@@ -78,6 +85,8 @@ def parse_log(text):
                 n_output += 1
                 if t and t0:
                     ends[k] = (t - t0).total_seconds()
+                if p is not None:
+                    run_ends[k] = (p - p0) % 86400  # past midnight
             else:
                 k = n_mc
                 if name == "mc":
@@ -94,7 +103,7 @@ def parse_log(text):
         d = loops[k]
         if "mc" not in d and "output" not in d:
             continue
-        out.append((k, d, ends.get(k), "mc" in d and "output" in d))
+        out.append((k, d, ends.get(k), run_ends.get(k), "mc" in d and "output" in d))
     return out, setup
 
 
@@ -110,7 +119,7 @@ def rows_for_batch(batch):
             continue
         L, run_h = loop_hours(r["variant"], case)
         loops, _ = parse_log(p.read_text(errors="replace"))
-        for k, d, t_end, complete in loops:
+        for k, d, t_end, t_run, complete in loops:
             sim_h = None
             if L:
                 sim_h = L if run_h is None else max(0, min(L, run_h - k * L))
@@ -123,7 +132,7 @@ def rows_for_batch(batch):
                 "mc_other_s": mc - d.get("jit", 0.0) - d.get("parallel", 0.0) if "mc" in d else None,
                 "mc_s": d.get("mc"), "output_s": d.get("output"), "loop_s": loop_s,
                 "s_per_h": loop_s / sim_h if sim_h else None,
-                "t_end_s": t_end, "complete": complete,
+                "t_end_s": t_end, "t_run_s": t_run, "complete": complete,
             })
     return rows
 

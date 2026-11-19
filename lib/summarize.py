@@ -10,8 +10,10 @@ median of the paired ratios with a 95% bootstrap interval. If the interval exclu
 difference is unlikely to be run-to-run noise.
 
 Warm-up runs and input preparation are excluded. Failed runs are counted and listed.
-It also reads t-route's own phase timings from the troute logs, and per-loop timings
-(lib/loops.py -> loops.csv) for runs of more than one t-route loop. Standard library only.
+It also reads t-route's own phase timings from the troute logs, per-loop timings
+(lib/loops.py -> loops.csv) for runs of more than one t-route loop, host load and steal
+from measure.py's samples, and the health checks (lib/health.py -> health.json).
+Plots (loops.png, resources.png) are drawn when matplotlib is installed. Standard library only.
 """
 import csv
 import json
@@ -84,6 +86,79 @@ def troute_phases(batch, rows):
         for k, s in seen.items():
             out[r["variant"]][k].append(s)
     return out
+
+
+NOISY_STEAL_PCT = 2.0      # mean steal above this: the hypervisor took CPU from the VM
+NOISY_OUTSIDE_CORES = 1.0  # mean host cores busy outside the container above this
+
+
+def host_section(good, variants, steps):
+    """Per variant and step: temperature, clock, cores used, other load on the host, steal."""
+    def mean(rs, k):
+        xs = [fnum(r.get(k)) for r in rs if fnum(r.get(k)) is not None]
+        return statistics.fmean(xs) if xs else None
+
+    def mx(rs, k):
+        xs = [fnum(r.get(k)) for r in rs if fnum(r.get(k)) is not None]
+        return max(xs) if xs else None
+
+    md = ["\n## Host during the runs\n",
+          "Means over runs. Cores = CPU cores the container used on average. Outside = host cores busy "
+          "with anything else (from /proc/stat; includes the benchmark's own sampler). Steal = CPU time "
+          f"the hypervisor took from this VM. ⚠ when mean steal > {NOISY_STEAL_PCT:g} % or outside > "
+          f"{NOISY_OUTSIDE_CORES:g} core: timings may be noisy.\n",
+          "| variant | step | temp °C | clock MHz | cores | outside cores mean (max) | steal % mean (max) | |",
+          "|---|---|---|---|---|---|---|---|"]
+    for v in variants:
+        for st in steps:
+            rs = [r for r in good if r["variant"] == v and r["step"] == st]
+            if not rs:
+                continue
+            om, sm = mean(rs, "outside_cores_mean"), mean(rs, "steal_mean_pct")
+            flag = "⚠" if (sm or 0) > NOISY_STEAL_PCT or (om or 0) > NOISY_OUTSIDE_CORES else ""
+            md.append(f"| {v} | {st} | {fmt(mean(rs, 'temp_mean_c'))} | {fmt(mean(rs, 'freq_mean_mhz'), 0)} | "
+                      f"{fmt(mean(rs, 'cores_mean'), 2)} | {fmt(om, 2)} ({fmt(mx(rs, 'outside_cores_max'), 2)}) | "
+                      f"{fmt(sm, 2)} ({fmt(mx(rs, 'steal_max_pct'), 2)}) | {flag} |")
+    return md
+
+
+STATUS_MARK = {"ok": "ok", "warn": "⚠ warn", "fail": "✗ FAIL"}
+
+
+def health_section(batch):
+    """Table of runs/*/*/r*/health.json (written by ./bench.sh health, lib/health.py)."""
+    files = sorted(batch.glob("runs/*/*/r*/health.json"))
+    if not files:
+        return []
+    md = ["\n## Health checks (kept outputs; `./bench.sh health`)\n",
+          "| run | check | status | note |", "|---|---|---|---|"]
+    counts = defaultdict(int)
+    for f in files:
+        run = "/".join(f.parent.relative_to(batch / "runs").parts)
+        try:
+            checks = json.loads(f.read_text())
+        except ValueError:
+            md.append(f"| {run} | – | ✗ FAIL | unreadable health.json |")
+            continue
+        for c in checks:
+            counts[c["status"]] += 1
+            md.append(f"| {run} | {c['check']} | {STATUS_MARK.get(c['status'], c['status'])} | {c['note']} |")
+    md.insert(1, f"{counts['ok']} ok, {counts['warn']} warn, {counts['fail']} fail.\n")
+    return md
+
+
+def resources_plot(batch):
+    """resources.png from the runs' samples.csv (after loops.csv: it marks loop ends)."""
+    try:
+        import plot_resources
+    except ImportError:
+        return []
+    try:
+        import matplotlib  # noqa: F401
+    except ImportError:
+        return []
+    return ["\n## Memory and CPU over time\n", "![memory and CPU over time](resources.png)"] \
+        if plot_resources.plot(batch) else []
 
 
 def slope(xs, ys):
@@ -230,16 +305,8 @@ def main():
                           "mem_peak_mib_median": statistics.median(mems) if mems else None,
                           "mem_peak_mib_max": max(mems) if mems else None})
 
-    # thermal / clock: did the machine slow down during the batch?
-    allm = [r for st in steps for r in series(st)]
-    if allm:
-        md.append("\n## Host during the runs\n")
-        md.append("| variant | mean CPU temp °C | mean clock MHz |")
-        md.append("|---|---|---|")
-        for v in variants:
-            t = [r["temp"] for r in allm if r["variant"] == v and r.get("temp")]
-            fq = [r["freq"] for r in allm if r["variant"] == v and r.get("freq")]
-            md.append(f"| {v} | {fmt(statistics.fmean(t)) if t else '–'} | {fmt(statistics.fmean(fq), 0) if fq else '–'} |")
+    # thermal / clock / other load: did the machine slow down or get busy during the batch?
+    md.extend(host_section(good, variants, steps))
 
     ph = troute_phases(batch, [r for r in good if r["step"] == "troute"])
     if ph:
@@ -253,6 +320,8 @@ def main():
                 fmt(statistics.median(ph[v][k]), 2) if ph.get(v, {}).get(k) else "–" for v in variants) + " |")
 
     md.extend(loop_section(batch, variants))
+    md.extend(resources_plot(batch))
+    md.extend(health_section(batch))
 
     if bad:
         md.append(f"\n## Failed runs ({len(bad)})\n")

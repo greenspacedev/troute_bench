@@ -5,6 +5,7 @@
 #   ./bench.sh run CASE VARIANT [VARIANT ...]   measured runs -> results/<batch>/
 #   ./bench.sh summarize [BATCH]                tables: median, spread, speedup vs baseline
 #   ./bench.sh compare [BATCH]                  do the variants' outputs agree with the baseline?
+#   ./bench.sh health [BATCH]                   sanity checks on kept outputs (NaN, depth, times, DA)
 #   ./bench.sh list                             cases, variants (and their builds), batches
 #
 # CASE is a file in cases/ (e.g. 03w_short, 03w_short_day); VARIANT is a file in
@@ -373,6 +374,9 @@ PY
     done
 
     log "done: ${BATCH}"
+    if [[ " ${STEPS} " == *" troute "* && "${KEEP}" != none ]]; then
+        cmd_health "${BATCH}" || log "health checks failed to run (summary without them)"
+    fi
     python3 "${LIB}/summarize.py" "${BATCH}"
 }
 
@@ -397,10 +401,25 @@ cmd_compare() {
         "${TRT_IMAGE}" /tblib/compare.py /batch
 }
 
+cmd_health() {
+    local b="${1:-$(latest_batch)}"
+    [[ -d "${b}" ]] || b="${RESULTS}/${b}"
+    [[ -d "${b}" ]] || die "no such batch: ${1}"
+    b="$(cd "${b}" && pwd)"   # absolute: docker -v needs it
+    local base
+    base=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["baseline"])' "${b}/batch.json")
+    eval "$(vars_from_build "${base%%@*}")"
+    # runs inside the t-route image (xarray/netCDF4/pandas) as root (its Python needs it);
+    # writes runs/*/*/r*/health.json owned like the batch folder
+    docker run --rm --network none -v "${b}:/batch" -v "${LIB}:/tblib:ro" \
+        --entrypoint python "${TRT_IMAGE}" /tblib/health.py /batch
+}
+
 case "${1:-}" in
     run) shift; cmd_run "$@" ;;
+    health) shift; cmd_health "$@" ;;
     summarize) shift; cmd_summarize "$@" ;;
     compare) shift; cmd_compare "$@" ;;
     list) cmd_list ;;
-    *) sed -n '3,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1 ;;
+    *) sed -n '3,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

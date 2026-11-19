@@ -15,7 +15,9 @@ FIELDS = ["batch", "case", "cycle", "start_time", "trial", "repeat", "order_pos"
           "warmup", "lambda", "cache", "inputs", "n_cpus",
           "wall_s", "container_s", "exit_code", "oom_killed", "cpu_user_s", "cpu_sys_s",
           "mem_peak_mib", "mem_current_max_mib", "freq_mean_mhz", "freq_min_mhz", "temp_mean_c",
-          "temp_max_c", "t_start_utc", "log"]
+          "temp_max_c", "t_start_utc", "log",
+          "cores_mean", "outside_cores_mean", "outside_cores_max", "steal_mean_pct", "steal_max_pct",
+          "load1_max"]
 
 
 def main():
@@ -28,8 +30,12 @@ def main():
         m = {"exit_code": "no-metrics"}
     row.update({k: v for k, v in m.items() if k in FIELDS})
     new = not os.path.exists(path)
+    fields = FIELDS
+    if not new:  # keep an existing file's columns (batches started before new fields)
+        with open(path, newline="") as f:
+            fields = next(csv.reader(f), FIELDS)
     with open(path, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
+        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         if new:
             w.writeheader()
         w.writerow(row)
