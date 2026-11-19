@@ -33,10 +33,19 @@ builds images, writes `builds/<variant>.json`. `bench.sh` runs those images.
 | Variant | routing-comparison | troute-usgsdf | t-route |
 |---|---|---|---|
 | `baseline` | greenspacedev `medium-range` `8b67fd4` | alk05 `temp_routelinkdev` `0a77846` | alk05 `update_for_feather_da` `ca72603` |
+| `baseline-long` | greenspacedev `long-runs` `b6cdc3a` | alk05 `temp_routelinkdev` `0a77846` | greenspacedev `feather-da-multiloop` `8c55a5d` |
 
 - `medium-range` = alk05 `updates_for_da` (`10e6b01`) + one commit enabling medium range:
   ensemble member 1 for `FORECAST_TYPE=2` (`fetch_nwm_data.py`), `medium_range` file names in
   `rename_troute_inputs.py`. Otherwise identical.
+- `baseline-long`: changes needed for runs longer than one forecast, nothing else.
+  - `long-runs` = `medium-range` + `FORECAST_TYPE=5`: chained AnA over `RUN_HOURS` (tm00 of
+    each hourly cycle t0+1 h .. t0+N h, named valid time − 1 h like the forecast rename), USGS
+    observations over the whole run (`makedf --observed-steps 0`), t-route loops of
+    `MAX_LOOP_SIZE` h (default 24).
+  - `feather-da-multiloop` = `ca72603` + fix: with `da_from_feather`, loop 2 crashed
+    (`usgs_timeslices_folder` None). Each loop now gets the feather columns from its own t0.
+    6-h vs 18-h loops agree to run-to-run noise (max rel 5e-4).
 - `preprocess.Dockerfile` clones troute-usgsdf unpinned (`git clone --depth 1 -b ...`).
   `lib/pin_usgsdf.py` replaces that `RUN` with a `COPY` at a fixed SHA. No other Dockerfile
   changes.
@@ -84,6 +93,7 @@ Environment variables (`VAR=value ./bench.sh run ...`). Full list: header of `be
 | `03w_short` | 1 short-range cycle, VPU 03W (135,375 segments, 18 h, 216 steps) | ~270 MB |
 | `03w_short_day` | 24 hourly cycles, consecutive | ~6.5 GB per pass |
 | `03w_medium` | 1 medium-range cycle, member 1 (240 h, 2880 steps); 00/06/12/18 UTC only | ~3.4 GB |
+| `03w_ana_1d` | chained AnA, 24 h, 24-h loops (`baseline-long` only) | ~340 MB |
 
 3-day run: `CYCLES=72 REPEATS=1 ./bench.sh run 03w_short_day baseline`
 
@@ -110,15 +120,18 @@ Environment variables (`VAR=value ./bench.sh run ...`). Full list: header of `be
   `TROUTE_PIP_PINS="pyarrow==23.0.0"`; `build.sh` checks the import.
 - **03W mask only** (`data/vpu03w_ids.txt` in the image). Other VPUs fail in preprocess.
 
-Longest supported run: one 240-h medium-range cycle (`03w_medium`).
+Forecast cases: longest is one 240-h medium-range cycle (`03w_medium`). Chained forecasts are
+not a valid long run (hour 240 is superseded by hour 234 of the next cycle); long runs use
+chained AnA (`baseline-long`) or the NWM v3.0 retrospective (planned).
 
 ## Roadmap
 
 1. Baseline on `03w_short`, `03w_short_day`, `03w_medium`; routing-only `N_CPUS` sweep.
 2. Mississippi VPU masks (05, 06, 07, 08, 10L, 10U, 11), mounted into preprocess (baseline image
    unchanged); per-VPU cases.
-3. Longer runs: long range, then a hindcast mode (hourly analysis_assim chained over
-   days–months, 24-h loops). ~10 GB NWM data per simulated month (14.3 MB/h CONUS).
+3. Long runs: chained AnA (done: `03w_ana_1d`), NWM v3.0 retrospective; 30 days, a season,
+   a year. AnA ~14 MB/h CONUS (~10 GB/month); retro ~46 MB/h (~33 GB/month). AnA before
+   2021-04-20 (NWM v2.0) does not match the v3.0 RouteLink; AnA/retro overlap 2021-04 .. 2023-01.
 
 ## Files
 

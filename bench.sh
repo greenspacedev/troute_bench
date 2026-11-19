@@ -36,6 +36,8 @@
 #   DOWNLOAD_JOBS=8  parallel NWM downloads (images that support it)
 #   USGS_CHUNK=      gages per USGS request (HYDROTOOLS_CHUNK_SIZE; hydrotools default 5).
 #                    40 = one request per troute-usgsdf batch: ~10 requests per 03W run, not ~74
+#   RUN_HOURS=       FORECAST_TYPE 5 (chained AnA): hours to run (case value)
+#   MAX_LOOP_SIZE=   FORECAST_TYPE 5: t-route max_loop_size in hours (preprocess default 24)
 #   MAX_LOOPS=       t-route max_loop_size values (forcing files = hours per loop), e.g.
 #                    "240 120 24". Each value runs as its own label VARIANT@L<n>. Needs
 #                    INPUTS=<variant>; leave postprocess out (it reads a single output file).
@@ -204,6 +206,7 @@ cmd_run() {
 
     export REPEATS STEPS INPUTS CACHE WARMUP LAMBDA KEEP N_CPUS VPU FORECAST_TYPE \
         START_TIME CYCLES CYCLE_STEP_H DESCRIPTION DOWNLOAD_JOBS USGS_CHUNK MAX_LOOPS
+    export RUN_HOURS="${RUN_HOURS:-}" MAX_LOOP_SIZE="${MAX_LOOP_SIZE:-}"
     CASE="${CASE}" VARS="${LABELS[*]}" HOST_OK="${host_ok}" BATCH_NAME="${batch_name}" \
     CYCS="${CYC_START[*]}" \
     python3 - "${BENCH}" "${LIB}/hostinfo.py" >"${BATCH}/batch.json" <<'PY'
@@ -218,7 +221,8 @@ print(json.dumps({
     "case": {"name": e["CASE"], "description": e.get("DESCRIPTION", ""), "vpu": e["VPU"],
              "forecast_type": e["FORECAST_TYPE"], "start_time": e["START_TIME"],
              "cycles": int(e["CYCLES"]), "cycle_step_h": int(e["CYCLE_STEP_H"]), "n_cpus": e["N_CPUS"],
-             "cycle_starts": e["CYCS"].split()},
+             "cycle_starts": e["CYCS"].split(),
+             "run_hours": e.get("RUN_HOURS", ""), "max_loop_size": e.get("MAX_LOOP_SIZE", "")},
     "options": {k.lower(): e[k] for k in ("REPEATS", "STEPS", "INPUTS", "CACHE", "WARMUP", "LAMBDA", "KEEP", "DOWNLOAD_JOBS", "USGS_CHUNK", "MAX_LOOPS")},
     "variants": vs, "baseline": vs[0],
     "builds": {b: json.load(open(f"{bench}/builds/{b}.json")) for b in bs},
@@ -264,6 +268,7 @@ PY
                      --env START_TIME="${start}" --env FORECAST_TYPE="${FORECAST_TYPE}"
                      --env VPU="${VPU}" --env N_CPUS="${N_CPUS}" --env HYDROTOOLS_USGS_API_KEY
                      --env DOWNLOAD_JOBS="${DOWNLOAD_JOBS}" ${USGS_CHUNK:+--env HYDROTOOLS_CHUNK_SIZE="${USGS_CHUNK}"} \
+                     ${RUN_HOURS:+--env RUN_HOURS="${RUN_HOURS}"} ${MAX_LOOP_SIZE:+--env MAX_LOOP_SIZE="${MAX_LOOP_SIZE}"} \
                      "${cache_args[@]}" "${PRE_IMAGE}") ;;
             troute)
                 cmd=(docker run --cidfile "${cid}" "${LIMITS[@]}" --env PYTHONUNBUFFERED=1
