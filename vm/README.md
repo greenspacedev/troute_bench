@@ -13,6 +13,8 @@
 ## One-time setup (sudo)
 
 1. Docker Engine with the cgroup v2 / systemd driver (Ubuntu default).
+   Plots in `summary.md` (`loops.png`): `sudo apt install python3-matplotlib`. Without it,
+   summaries still work and skip the plots.
    <!-- TODO: remaining dependencies/tools -->
 
 2. Group and data directory:

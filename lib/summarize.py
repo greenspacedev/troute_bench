@@ -10,7 +10,8 @@ median of the paired ratios with a 95% bootstrap interval. If the interval exclu
 difference is unlikely to be run-to-run noise.
 
 Warm-up runs and input preparation are excluded. Failed runs are counted and listed.
-It also reads t-route's own phase timings from the troute logs. Standard library only.
+It also reads t-route's own phase timings from the troute logs, and per-loop timings
+(lib/loops.py -> loops.csv) for runs of more than one t-route loop. Standard library only.
 """
 import csv
 import json
@@ -21,13 +22,20 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import loops as loopmod  # noqa: E402
+
 LAMBDA_MEM_MIB = 10240
 PHASE_RES = [
     re.compile(r"\]: (?P<k>.+?) complete in (?P<s>[\d.]+) seconds"),
     re.compile(r"\]: (?P<k>JIT Preprocessing time|PARALLEL TIME) (?P<s>[\d.]+) seconds"),
     re.compile(r"\]: (?P<k>.+?) took (?P<s>[\d.]+) seconds"),
     re.compile(r"\]: (?P<k>Total execution time): (?P<s>[\d.]+) secs"),
+    # t-route's TIMING SUMMARY buckets: "Routing computations: 17.23 secs, 61.58 %"
+    re.compile(r"\]: (?P<k>Network graph construction|Forcing array construction|Routing computations"
+               r"|Output writing): (?P<s>[\d.]+) secs"),
 ]
+SKIP_PHASES = {"process"}  # main_v04 "process complete": same span as Total execution time
 
 
 def fnum(x):
@@ -70,11 +78,64 @@ def troute_phases(batch, rows):
             for rx in PHASE_RES:
                 m = rx.search(line)
                 if m:
-                    seen[m["k"].strip()] += float(m["s"])
+                    if m["k"].strip() not in SKIP_PHASES:
+                        seen[m["k"].strip()] += float(m["s"])
                     break
         for k, s in seen.items():
             out[r["variant"]][k].append(s)
     return out
+
+
+def slope(xs, ys):
+    """Least-squares slope of ys on xs (None with fewer than 3 points)."""
+    if len(xs) < 3:
+        return None
+    mx, my = statistics.fmean(xs), statistics.fmean(ys)
+    sxx = sum((x - mx) ** 2 for x in xs)
+    return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sxx if sxx else None
+
+
+def loop_section(batch, variants):
+    """loops.csv and the summary.md lines for runs with more than one t-route loop."""
+    rows = loopmod.rows_for_batch(batch)
+    loopmod.write_csv(batch, rows)
+    by_run = defaultdict(list)
+    for r in rows:
+        if r["complete"]:
+            by_run[(r["variant"], r["cycle"], r["trial"])].append(r)
+    if not any(len(v) > 1 for v in by_run.values()):
+        return []
+    md = ["\n## t-route loops (from loops.csv)\n",
+          "Per run: loops, then medians over loops 1.. (loop 0 adds one-time JIT compile). "
+          "s/h = loop seconds per simulated hour. Growth = median s/h of the last quarter of "
+          "loops / first quarter (1.00 = flat); slope = change in loop s per loop.\n",
+          "| variant | run | loops | h/loop | loop 0 s | loop s | s/h | forcing | JIT | PARALLEL | MC other | output | growth | slope s/loop |",
+          "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for (v, cyc, trial), rs in sorted(by_run.items(), key=lambda kv: (variants.index(kv[0][0])
+                                                                       if kv[0][0] in variants else 99, kv[0][1:])):
+        if len(rs) < 2:
+            continue
+        rs = sorted(rs, key=lambda r: r["loop"])
+        rest = rs[1:]
+        med = lambda k: statistics.median([r[k] for r in rest if r[k] is not None]) \
+            if any(r[k] is not None for r in rest) else None
+        q = max(1, len(rest) // 4)
+        sph = [r["s_per_h"] for r in rest]
+        growth = None
+        if len(rest) >= 4 and all(x is not None for x in sph):
+            growth = statistics.median(sph[-q:]) / statistics.median(sph[:q])
+        sl = slope([r["loop"] for r in rest], [r["loop_s"] for r in rest])
+        md.append(f"| {v} | {cyc} t{trial} | {len(rs)} | {rs[1]['sim_h'] or '–'} | {fmt(rs[0]['loop_s'], 2)} | "
+                  f"{fmt(med('loop_s'), 2)} | {fmt(med('s_per_h'), 3)} | {fmt(med('forcing_s'), 2)} | "
+                  f"{fmt(med('jit_s'), 2)} | {fmt(med('parallel_s'), 2)} | {fmt(med('mc_other_s'), 2)} | "
+                  f"{fmt(med('output_s'), 2)} | {fmt(growth, 2)} | {fmt(sl, 4)} |")
+    try:
+        import plot_loops
+        if plot_loops.plot(batch):
+            md.append("\n![per-loop t-route timings](loops.png)")
+    except ImportError:
+        md.append("\n(loops.png not drawn: matplotlib not installed)")
+    return md
 
 
 def main():
@@ -190,6 +251,8 @@ def main():
         for k in keys[:15]:
             md.append(f"| {k} | " + " | ".join(
                 fmt(statistics.median(ph[v][k]), 2) if ph.get(v, {}).get(k) else "–" for v in variants) + " |")
+
+    md.extend(loop_section(batch, variants))
 
     if bad:
         md.append(f"\n## Failed runs ({len(bad)})\n")

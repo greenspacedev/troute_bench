@@ -20,6 +20,7 @@ Output: `results/<UTC time>_<case>/`
 | File | Contents |
 |---|---|
 | `summary.md` / `summary.csv` | median wall time per step/variant, spread, speedup vs baseline (95% CI), CPU time, peak memory, t-route phases |
+| `loops.csv` / `loops.png` | multi-loop runs: per-loop t-route phases (forcing, JIT, PARALLEL, MC other, output), s per simulated hour, growth over the run; plot needs matplotlib |
 | `compare.md` | agreement with baseline: t-route flows, DA dataframe, restart |
 | `runs.csv` | one row per step: wall, CPU, peak memory, OOM, clock, temperature |
 | `batch.json` | case, options, commits, image IDs, host |
@@ -146,6 +147,8 @@ chained AnA (`baseline-long`) or the NWM v3.0 retrospective (planned).
 | `lib/measure.py` | run one container; wall/CPU/peak memory (cgroup), OOM, clock, temperature |
 | `lib/record.py` | append a step to `runs.csv` |
 | `lib/summarize.py` | `summary.md` / `summary.csv` |
+| `lib/loops.py` | per-loop t-route timings from `troute.log` → `loops.csv` |
+| `lib/plot_loops.py` | `loops.png` (matplotlib; skipped if missing) |
 | `lib/compare.py` | `compare.md` (runs in the t-route image) |
 | `lib/hostinfo.py` | host description, power check |
 | `lib/pin_usgsdf.py` | pin troute-usgsdf in `preprocess.Dockerfile` |
