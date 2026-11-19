@@ -234,7 +234,8 @@ def main():
             totals.append({"cycle": cyc, "trial": trial, "variant": v, "step": "total",
                            "wall_s": sum(float(x["wall_s"]) for x in d.values()),
                            "cpu": sum((fnum(x["cpu_user_s"]) or 0) + (fnum(x["cpu_sys_s"]) or 0) for x in d.values()),
-                           "mem": max((fnum(x["mem_peak_mib"]) or 0) for x in d.values())})
+                           "mem": max((fnum(x["mem_peak_mib"]) or 0) for x in d.values()),
+                           "anon": max((fnum(x.get("mem_anon_max_mib")) or 0) for x in d.values()) or None})
 
     def series(step):
         if step == "total":
@@ -242,7 +243,8 @@ def main():
         return [{"cycle": r["cycle"], "trial": r["trial"], "variant": r["variant"], "step": step,
                  "wall_s": float(r["wall_s"]),
                  "cpu": (fnum(r["cpu_user_s"]) or 0) + (fnum(r["cpu_sys_s"]) or 0),
-                 "mem": fnum(r["mem_peak_mib"]), "temp": fnum(r["temp_mean_c"]),
+                 "mem": fnum(r["mem_peak_mib"]), "anon": fnum(r.get("mem_anon_max_mib")),
+                 "temp": fnum(r["temp_mean_c"]),
                  "freq": fnum(r["freq_mean_mhz"])} for r in good if r["step"] == step]
 
     table, md = [], []
@@ -265,8 +267,11 @@ def main():
                   f"usgsdf {s['usgsdf']['sha'][:7]} ({s['usgsdf']['ref']}), t-route {s['troute']['sha'][:7]} ({s['troute']['ref']})")
 
     md.append("\n## Wall time (s)\n")
-    md.append("| step | variant | n | median | IQR | min–max | speedup vs " + base + " (95% CI) | CPU s | peak mem MiB (max) |")
-    md.append("|---|---|---|---|---|---|---|---|---|")
+    md.append("Memory: **process** = anon (heap, arrays) at its highest, what a memory limit has to fit; "
+              "**incl. cache** = cgroup memory.peak, which also counts the page cache of files read and "
+              "written (reclaimable). ⚠ when process memory (or, without it, the peak) > 10 GB.\n")
+    md.append("| step | variant | n | median | IQR | min–max | speedup vs " + base + " (95% CI) | CPU s | process mem MiB (max) | incl. cache MiB (max) |")
+    md.append("|---|---|---|---|---|---|---|---|---|---|")
     for step in steps + ["total"]:
         rows = series(step)
         by_v = defaultdict(list)
@@ -276,12 +281,13 @@ def main():
         for v in variants:
             rs = by_v.get(v, [])
             if not rs:
-                md.append(f"| {step} | {v} | 0 | | | | | | |")
+                md.append(f"| {step} | {v} | 0 | | | | | | | |")
                 continue
             w = sorted(r["wall_s"] for r in rs)
             med = statistics.median(w)
             q1, q3 = quart(w)
             mems = [r["mem"] for r in rs if r.get("mem")]
+            anons = [r["anon"] for r in rs if r.get("anon")]
             cpu = statistics.median(r["cpu"] for r in rs)
             sp = lo = hi = None
             if v != base:
@@ -294,16 +300,21 @@ def main():
                 "–" if sp is None else f"{sp:.2f}×" + (f" ({lo:.2f}–{hi:.2f})" if lo else " (n<3)")
                 + (" **" + ("faster" if lo > 1 else "slower") + "**" if lo and (lo > 1 or hi < 1) else ""))
             mem_txt = "–" if not mems else f"{statistics.median(mems):.0f} ({max(mems):.0f})"
-            if mems and max(mems) > LAMBDA_MEM_MIB:
+            anon_txt = "–" if not anons else f"{statistics.median(anons):.0f} ({max(anons):.0f})"
+            if anons and max(anons) > LAMBDA_MEM_MIB:
+                anon_txt += " ⚠ >10 GB"
+            elif not anons and mems and max(mems) > LAMBDA_MEM_MIB:
                 mem_txt += " ⚠ >10 GB"
             md.append(f"| {step} | {v} | {len(w)} | {med:.1f} | {fmt(q1)}–{fmt(q3)} | {w[0]:.1f}–{w[-1]:.1f} | "
-                      f"{sp_txt} | {cpu:.1f} | {mem_txt} |")
+                      f"{sp_txt} | {cpu:.1f} | {anon_txt} | {mem_txt} |")
             table.append({"step": step, "variant": v, "n": len(w), "median_s": round(med, 3),
                           "q1_s": q1, "q3_s": q3, "min_s": w[0], "max_s": w[-1],
                           "speedup": sp, "speedup_ci_lo": lo, "speedup_ci_hi": hi,
                           "cpu_s_median": round(cpu, 2),
                           "mem_peak_mib_median": statistics.median(mems) if mems else None,
-                          "mem_peak_mib_max": max(mems) if mems else None})
+                          "mem_peak_mib_max": max(mems) if mems else None,
+                          "mem_anon_mib_median": statistics.median(anons) if anons else None,
+                          "mem_anon_mib_max": max(anons) if anons else None})
 
     # thermal / clock / other load: did the machine slow down or get busy during the batch?
     md.extend(host_section(good, variants, steps))

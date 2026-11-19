@@ -17,7 +17,7 @@ FIELDS = ["batch", "case", "cycle", "start_time", "trial", "repeat", "order_pos"
           "mem_peak_mib", "mem_current_max_mib", "freq_mean_mhz", "freq_min_mhz", "temp_mean_c",
           "temp_max_c", "t_start_utc", "log",
           "cores_mean", "outside_cores_mean", "outside_cores_max", "steal_mean_pct", "steal_max_pct",
-          "load1_max"]
+          "load1_max", "mem_anon_max_mib"]
 
 
 def main():

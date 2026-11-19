@@ -3,8 +3,8 @@
 
   plot_resources.py BATCH_DIR
 
-One row per (variant, step) for the variant's first timed run: container memory (left
-axis), container CPU cores in use and host cores busy outside the container (right axis),
+One row per (variant, step) for the variant's first timed run: process memory (anon) and
+memory incl. page cache (left axis), container CPU cores in use and host cores busy outside the container (right axis),
 steal shaded. On t-route rows, dotted lines mark the end of each loop (loops.csv t_run_s).
 Shows whether memory grows over a long run, how many cores each phase really uses, and
 whether something else on the host competed. Needs matplotlib; summarize.py calls it when
@@ -47,7 +47,12 @@ def plot(batch):
     for ax, (r, s) in zip(axes[:, 0], panels):
         t = [float(x["t_s"]) for x in s]
         mem = [float(x["mem_mib"]) / 1024 for x in s]
-        ax.plot(t, mem, color="#4C78A8", lw=1.5, label="container memory (GiB)")
+        anon = [float(x["anon_mib"]) / 1024 for x in s if x.get("anon_mib")]
+        if len(anon) == len(t):
+            ax.plot(t, mem, color="#4C78A8", lw=1, ls="--", alpha=0.6, label="memory incl. page cache (GiB)")
+            ax.plot(t, anon, color="#4C78A8", lw=1.8, label="process memory, anon (GiB)")
+        else:  # samples from before anon was recorded
+            ax.plot(t, mem, color="#4C78A8", lw=1.5, label="container memory incl. page cache (GiB)")
         ax.set_ylim(0, max(mem) * 1.15 or 1)
         ax.set_ylabel("memory GiB", color="#4C78A8")
         ax.set_xlabel("seconds since step start")

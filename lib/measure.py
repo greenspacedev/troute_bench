@@ -10,7 +10,9 @@ and then removed here.
 While it runs, every 0.25 s this samples
   - the container's cgroup (cgroup v2, systemd driver:
     /sys/fs/cgroup/system.slice/docker-<id>.scope): memory.peak (kernel high-water
-    mark), memory.current, cpu.stat user/system time;
+    mark), memory.current, memory.stat anon/file, cpu.stat user/system time.
+    memory.peak/current include the page cache of files the step reads and writes
+    (reclaimable); anon is the processes' own memory (heap, arrays): mem_anon_max_mib;
   - the host: mean CPU clock over all cores (cpufreq) and the CPU temperature
     (k10temp / coretemp), so heat-related slowdown is visible in the results;
   - the host's /proc/stat and /proc/loadavg: busy cores, steal (a VM's vCPUs waiting for
@@ -75,7 +77,7 @@ def host_cpu():
     return total, total - idle - steal, steal
 
 
-SAMPLE_FIELDS = ["t_s", "mem_mib", "cores", "host_busy_cores", "outside_cores", "steal_pct", "steal_cores", "load1"]
+SAMPLE_FIELDS = ["t_s", "mem_mib", "anon_mib", "file_mib", "cores", "host_busy_cores", "outside_cores", "steal_pct", "steal_cores", "load1"]
 
 
 class Sampler(threading.Thread):
@@ -86,7 +88,8 @@ class Sampler(threading.Thread):
         self.ncpu = os.cpu_count() or 1
         self.stop = threading.Event()
         self.cg = None
-        self.mem_peak = self.mem_cur_max = 0
+        self.mem_peak = self.mem_cur_max = self.anon_max = 0
+        self.anon_now = self.file_now = 0
         self.cpu_user_us = self.cpu_sys_us = 0
         self.freqs, self.temps = [], []
         self.tsensor = temp_sensor()
@@ -113,6 +116,7 @@ class Sampler(threading.Thread):
                 cores = (cpu_us - prev[1]) / 1e6 / dt_s
                 busy = (host[1] - prev[2][1]) / dtot * self.ncpu
                 row = {"t_s": round(t - self.t0, 2), "mem_mib": round(self.mem_now / 2**20, 1),
+                       "anon_mib": round(self.anon_now / 2**20, 1), "file_mib": round(self.file_now / 2**20, 1),
                        "cores": round(cores, 2), "host_busy_cores": round(busy, 2),
                        "outside_cores": round(max(0.0, busy - cores), 2),
                        "steal_pct": round((host[2] - prev[2][2]) / dtot * 100, 2),
@@ -135,6 +139,15 @@ class Sampler(threading.Thread):
                 if cur:
                     self.mem_now = int(cur)
                     self.mem_cur_max = max(self.mem_cur_max, int(cur))
+                mstat = read(f"{self.cg}/memory.stat")
+                if mstat:
+                    for l in mstat.splitlines():
+                        k, _, v = l.partition(" ")
+                        if k == "anon":
+                            self.anon_now = int(v)
+                            self.anon_max = max(self.anon_max, self.anon_now)
+                        elif k == "file":
+                            self.file_now = int(v)
                 stat = read(f"{self.cg}/cpu.stat")
                 if stat:
                     kv = dict(l.split() for l in stat.splitlines() if len(l.split()) == 2)
@@ -210,7 +223,8 @@ def main():
     sampler = Sampler(a.cidfile, samples_path=base + ".samples.csv")
     sampler.start()
     t0 = time.time()
-    with open(a.log, "a") as logf:
+    # line-buffered: the log is readable while the step runs (Python >= 3.14 buffers 128 KiB otherwise)
+    with open(a.log, "a", buffering=1) as logf:
         logf.write(f"{time.strftime('%H:%M:%S')} ==> {' '.join(cmd)}\n")
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                              errors="replace", bufsize=1)
@@ -248,6 +262,7 @@ def main():
         "cpu_sys_s": round(sampler.cpu_sys_us / 1e6, 3),
         "mem_peak_mib": round(sampler.mem_peak / 2**20, 1) if sampler.mem_peak else None,
         "mem_current_max_mib": round(sampler.mem_cur_max / 2**20, 1) if sampler.mem_cur_max else None,
+        "mem_anon_max_mib": round(sampler.anon_max / 2**20, 1) if sampler.anon_max else None,
         "cgroup_found": sampler.cg is not None,
         "freq_mean_mhz": round(statistics.fmean(sampler.freqs), 0) if sampler.freqs else None,
         "freq_min_mhz": round(min(sampler.freqs), 0) if sampler.freqs else None,

@@ -108,7 +108,7 @@ request), not with `USGS_CHUNK`; large chunks on year-long windows hit the page 
 | `loops.csv` / `loops.png` | multi-loop runs: per-loop t-route phases (forcing, JIT, PARALLEL, MC other, output), s per simulated hour, growth over the run |
 | `resources.png` | per step: container memory and cores over time, host cores busy outside the run, steal; t-route loop ends marked |
 | `compare.md` | `./bench.sh compare`: agreement with the baseline (t-route flows, DA dataframe, restart) |
-| `runs.csv` | one row per step: wall, CPU, peak memory, OOM, clock, temperature, cores, outside load, steal |
+| `runs.csv` | one row per step: wall, CPU, peak memory (process and incl. cache), OOM, clock, temperature, cores, outside load, steal |
 | `batch.json` | case, options, commits, image IDs, host |
 | `runs/<cycle>/<variant>/r<k>/` | logs, `<step>.json`, `<step>.samples.csv` (~1 s), `health.json`; repeat 1 keeps `data/` |
 
@@ -123,7 +123,9 @@ Plots need matplotlib; without it the summary skips them.
 - **Host noise.** Mean CPU temperature and clock (when the host exposes them), cores busy outside
   the run, and steal per step. ⚠ when steal > 2 % or outside load > 1 core: rerun.
 - **CPU.** `CPU s / wall s` ≈ cores used. `cores` in the host table is the same from samples.
-- **Memory.** cgroup `memory.peak`, including page cache. > 10 GB flagged (Lambda limit).
+- **Memory.** *Process* = cgroup `anon` (heap, arrays) at its highest: what a memory limit must fit.
+  *Incl. cache* = `memory.peak`, which also counts page cache of files read and written
+  (grows with forcing downloads; reclaimable). > 10 GB flagged on process memory (Lambda limit).
 - **Loops.** Loop 0 includes one-time JIT compilation. `growth` ≈ 1.00 means later loops cost the
   same as early ones; `slope` is the change in seconds per loop.
 - **Health.** `warn` notes known quirks (all-NaN `nudge`; negative flow copied from negative USGS
