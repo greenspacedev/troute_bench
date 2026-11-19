@@ -58,9 +58,12 @@ speedups and `./bench.sh compare`.
 | `03w_medium` | 1 medium-range cycle, member 1 (240 h); 00/06/12/18 UTC only | ~3.4 GB |
 | `03w_ana_1d` | chained AnA, 24 h (`baseline-long`) | ~340 MB |
 | `03w_retro_1d` | chained retro v3.0, 24 h (`baseline-long`) | ~1.2 GB |
+| `03w_{ana,retro}_30d` | 720 h from 2022-03-12 | ~10 / ~35 GB |
+| `03w_{ana,retro}_season` | 2160 h from 2022-01-16 | ~30 / ~105 GB |
+| `03w_{ana,retro}_wy2022` | 8760 h from 2021-10-01 (water year 2022) | ~125 / ~420 GB |
 
-Long runs: copy an `_1d` case and set `RUN_HOURS`, `START_TIME`. AnA files are ~14 MB/h, retro
-~48 MB/h. AnA before 2021-04-20 (NWM v2.0) does not match the v3.0 RouteLink. Chained forecasts
+Long-run windows are nested (30d ⊂ season ⊂ wy2022) and identical in AnA and retro. AnA files are
+~14 MB/h, retro ~48 MB/h; forcing is deleted after repeat 1 (`KEEP=first`). AnA before 2021-04-20 (NWM v2.0) does not match the v3.0 RouteLink. Chained forecasts
 are not a valid long run (hour 240 is superseded by hour 234 of the next cycle).
 
 ## Tracks
