@@ -124,7 +124,7 @@ def main():
     if not meta.get("host_check_passed", True):
         md.append("\n> **Warning:** the host check failed (battery or power-saver). Timings are not comparable with other batches.")
     for v in variants:
-        s = meta["builds"][v]["sources"]
+        s = meta["builds"][v.split("@")[0]]["sources"]
         md.append(f"\n- `{v}`: routing {s['routing']['sha'][:7]} ({s['routing']['ref']}), "
                   f"usgsdf {s['usgsdf']['sha'][:7]} ({s['usgsdf']['ref']}), t-route {s['troute']['sha'][:7]} ({s['troute']['ref']})")
 

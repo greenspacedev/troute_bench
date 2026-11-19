@@ -74,6 +74,7 @@ Environment variables (`VAR=value ./bench.sh run ...`). Full list: header of `be
 | `KEEP` | `first` | outputs kept: `first`, `all`, `none` |
 | `HOST_CHECK` | 1 | 0: skip power check (batch flagged) |
 | `USGS_CHUNK` | | gages per USGS request (`HYDROTOOLS_CHUNK_SIZE`, hydrotools default 5); 40: ~10 requests per 03W run instead of ~74 |
+| `MAX_LOOPS` | | t-route `max_loop_size` values (hours per loop), e.g. `"240 24"`; each runs as `<variant>@L<n>`. Needs `INPUTS=<variant>`, no postprocess |
 | `N_CPUS`, `START_TIME`, `CYCLES`, ... | case | override case values |
 
 ## Cases

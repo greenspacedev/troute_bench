@@ -36,6 +36,9 @@
 #   DOWNLOAD_JOBS=8  parallel NWM downloads (images that support it)
 #   USGS_CHUNK=      gages per USGS request (HYDROTOOLS_CHUNK_SIZE; hydrotools default 5).
 #                    40 = one request per troute-usgsdf batch: ~10 requests per 03W run, not ~74
+#   MAX_LOOPS=       t-route max_loop_size values (forcing files = hours per loop), e.g.
+#                    "240 120 24". Each value runs as its own label VARIANT@L<n>. Needs
+#                    INPUTS=<variant>; leave postprocess out (it reads a single output file).
 #   HYDROTOOLS_USGS_API_KEY  USGS key; read from .env if present (never commit it)
 #   Case values (START_TIME, CYCLES, CYCLE_STEP_H, VPU, N_CPUS, ...) can be overridden too.
 #
@@ -45,6 +48,7 @@
 #   INPUTS=baseline STEPS=troute N_CPUS=4 ./bench.sh run 03w_short baseline
 #   REPEATS=1 ./bench.sh run 03w_short_day baseline             # 24 consecutive cycles
 #   REPEATS=1 WARMUP=0 ./bench.sh run 03w_medium baseline       # 10-day medium range
+#   LAMBDA=1 INPUTS=baseline STEPS=troute MAX_LOOPS="240 24" ./bench.sh run 03w_medium baseline
 #   ./bench.sh summarize && ./bench.sh compare
 # =============================================================================
 set -euo pipefail
@@ -119,6 +123,7 @@ cmd_run() {
     INPUTS="${INPUTS:-own}"; CACHE="${CACHE:-off}"; WARMUP="${WARMUP:-1}"
     LAMBDA="${LAMBDA:-0}"; KEEP="${KEEP:-first}"; ECHO="${ECHO:-0}"
     HOST_CHECK="${HOST_CHECK:-1}"; MIN_FREE_GB="${MIN_FREE_GB:-10}"; DOWNLOAD_JOBS="${DOWNLOAD_JOBS:-8}"; USGS_CHUNK="${USGS_CHUNK:-}"
+    MAX_LOOPS="${MAX_LOOPS:-}"
     [[ "${CACHE}" =~ ^(off|cold|warm)$ ]] || die "CACHE must be off, cold or warm"
     [[ "${KEEP}" =~ ^(first|all|none)$ ]] || die "KEEP must be first, all or none"
     read -r -a STEP_LIST <<<"${STEPS}"
@@ -128,6 +133,20 @@ cmd_run() {
         [[ -f "${BENCH}/builds/${INPUTS}.json" ]] || die "INPUTS=${INPUTS}: no such built variant"
     else
         [[ "${STEP_LIST[0]}" == preprocess ]] || die "with INPUTS=own the first step must be preprocess (or set INPUTS=<variant>)"
+    fi
+    # run labels: the variants, or VARIANT@L<n> per MAX_LOOPS value
+    local -a LABELS=()
+    if [[ -n "${MAX_LOOPS}" ]]; then
+        [[ "${INPUTS}" != own ]] || die "MAX_LOOPS edits troute.yaml of frozen inputs; set INPUTS=<variant>"
+        [[ " ${STEPS} " != *" postprocess "* ]] || die "MAX_LOOPS: leave postprocess out of STEPS (it expects one output file)"
+        for v in "${VARIANTS[@]}"; do
+            for n in ${MAX_LOOPS}; do
+                [[ "${n}" =~ ^[1-9][0-9]*$ ]] || die "MAX_LOOPS values must be positive integers"
+                LABELS+=("${v}@L${n}")
+            done
+        done
+    else
+        LABELS=("${VARIANTS[@]}")
     fi
 
     # case
@@ -184,14 +203,15 @@ cmd_run() {
     [[ "${CYC_START[0]}" == "${START_TIME}" ]] || die "internal: first cycle ${CYC_START[0]} != START_TIME ${START_TIME}"
 
     export REPEATS STEPS INPUTS CACHE WARMUP LAMBDA KEEP N_CPUS VPU FORECAST_TYPE \
-        START_TIME CYCLES CYCLE_STEP_H DESCRIPTION DOWNLOAD_JOBS USGS_CHUNK
-    CASE="${CASE}" VARS="${VARIANTS[*]}" HOST_OK="${host_ok}" BATCH_NAME="${batch_name}" \
+        START_TIME CYCLES CYCLE_STEP_H DESCRIPTION DOWNLOAD_JOBS USGS_CHUNK MAX_LOOPS
+    CASE="${CASE}" VARS="${LABELS[*]}" HOST_OK="${host_ok}" BATCH_NAME="${batch_name}" \
     CYCS="${CYC_START[*]}" \
     python3 - "${BENCH}" "${LIB}/hostinfo.py" >"${BATCH}/batch.json" <<'PY'
 import json, os, subprocess, sys, datetime
 bench, hostinfo = sys.argv[1], sys.argv[2]
 e = os.environ
 vs = e["VARS"].split()
+bs = sorted({v.split("@")[0] for v in vs} | ({e["INPUTS"]} if e["INPUTS"] != "own" else set()))
 print(json.dumps({
     "batch": e["BATCH_NAME"],
     "started_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
@@ -199,9 +219,9 @@ print(json.dumps({
              "forecast_type": e["FORECAST_TYPE"], "start_time": e["START_TIME"],
              "cycles": int(e["CYCLES"]), "cycle_step_h": int(e["CYCLE_STEP_H"]), "n_cpus": e["N_CPUS"],
              "cycle_starts": e["CYCS"].split()},
-    "options": {k.lower(): e[k] for k in ("REPEATS", "STEPS", "INPUTS", "CACHE", "WARMUP", "LAMBDA", "KEEP", "DOWNLOAD_JOBS", "USGS_CHUNK")},
+    "options": {k.lower(): e[k] for k in ("REPEATS", "STEPS", "INPUTS", "CACHE", "WARMUP", "LAMBDA", "KEEP", "DOWNLOAD_JOBS", "USGS_CHUNK", "MAX_LOOPS")},
     "variants": vs, "baseline": vs[0],
-    "builds": {v: json.load(open(f"{bench}/builds/{v}.json")) for v in set(vs + ([e["INPUTS"]] if e["INPUTS"] != "own" else []))},
+    "builds": {b: json.load(open(f"{bench}/builds/{b}.json")) for b in bs},
     "host": json.loads(subprocess.run([sys.executable, hostinfo], capture_output=True, text=True).stdout),
     "host_check_passed": e["HOST_OK"] == "1",
 }, indent=1))
@@ -283,7 +303,7 @@ PY
         local data="${rdir}/data"
         check_disk
         mkdir -p "${data}"
-        eval "$(vars_from_build "${v}")"
+        eval "$(vars_from_build "${v%%@*}")"
         case "${CACHE}" in
             cold) cache="${rdir}/nwm-cache" ;;
             warm) cache="${SHARED_CACHE}" ;;
@@ -291,7 +311,9 @@ PY
         if [[ "${INPUTS}" != own ]]; then
             cp -al "${BATCH}/inputs/${label}/data/." "${data}/"
             # private copy of the config (never edit a hard-linked file in place)
-            sed "s/^\(\s*cpu_pool\s*:\s*\).*/\1${N_CPUS}/" "${data}/troute.yaml" >"${data}/troute.yaml.new"
+            local loop_sed=()
+            [[ "${v}" == *@L* ]] && loop_sed=(-e "s/^\(\s*max_loop_size\s*:\s*\).*/\1${v##*@L}/")
+            sed -e "s/^\(\s*cpu_pool\s*:\s*\).*/\1${N_CPUS}/" "${loop_sed[@]}" "${data}/troute.yaml" >"${data}/troute.yaml.new"
             mv -f "${data}/troute.yaml.new" "${data}/troute.yaml"
         fi
         local tag="${label} ${v} r${rep}"; [[ "${warm}" == 1 ]] && tag+=" (warm-up)"
@@ -322,23 +344,23 @@ PY
 
     log "batch ${batch_name}"
     log "  case ${CASE}: VPU ${VPU}, forecast type ${FORECAST_TYPE}, ${CYCLES} cycle(s) from ${START_TIME}, N_CPUS ${N_CPUS}"
-    log "  variants: ${VARIANTS[*]} (baseline: ${VARIANTS[0]}); repeats ${REPEATS}; steps: ${STEPS}"
+    log "  variants: ${LABELS[*]} (baseline: ${LABELS[0]}); repeats ${REPEATS}; steps: ${STEPS}"
     log "  inputs ${INPUTS}; cache ${CACHE}; warm-up ${WARMUP}; lambda limits ${LAMBDA}; keep ${KEEP}"
     trap 'echo; log "interrupted; partial results in ${BATCH}"; exit 130' INT TERM
 
-    local nvar=${#VARIANTS[@]} trial=0 ci rep i
+    local nvar=${#LABELS[@]} trial=0 ci rep i
     for ((ci = 0; ci < CYCLES; ci++)); do
         local start="${CYC_START[ci]}" label
         label=$(printf 'c%02d_%s' "${ci}" "${start}")
         [[ "${INPUTS}" != own ]] && prepare_inputs "${label}" "${start}"
         if [[ "${WARMUP}" == 1 ]] && { (( ci == 0 )) || [[ "${CACHE}" == warm ]]; }; then
-            for ((i = 0; i < nvar; i++)); do run_one "${label}" "${start}" "${VARIANTS[i]}" 0 0 "${i}" 1; done
+            for ((i = 0; i < nvar; i++)); do run_one "${label}" "${start}" "${LABELS[i]}" 0 0 "${i}" 1; done
         fi
         for ((rep = 1; rep <= REPEATS; rep++)); do
             trial=$((trial + 1))
             # rotate the variant order every trial so no variant always runs first (or hot)
             for ((i = 0; i < nvar; i++)); do
-                local v="${VARIANTS[(i + trial - 1) % nvar]}"
+                local v="${LABELS[(i + trial - 1) % nvar]}"
                 run_one "${label}" "${start}" "${v}" "${rep}" "${trial}" "${i}" 0
             done
         done
